@@ -162,6 +162,8 @@ class ResearchRunner:
                     self.git.add()
                     self.git.commit()
                     self.git.push()
+                logger.info("Cleaning remote untracked files to avoid merge conflicts...")
+                self.ssh.execute(f"cd {self.remote_repo} && git clean -f -d")
                 pull_res = self.git.remote_pull()
                 if not pull_res.get("success"):
                     return {"success": False, "error": f"Failed remote pull sync: {pull_res.get('error')}"}
@@ -183,10 +185,10 @@ class ResearchRunner:
 
             # 6. Execute Research Script
             script_path = f"research_engine/run_sweep_{candidate_clean}.py"
-            run_cmd = f"cd {self.remote_repo} && venv/bin/python {script_path} --workers {workers}"
+            run_cmd = f"cd {self.remote_repo} && venv/bin/python -u {script_path} --workers {workers}"
 
             logger.info(f"Launching remote command: {run_cmd}")
-            stdin, stdout, stderr = self.ssh.client.exec_command(run_cmd, get_pty=True)
+            stdin, stdout, stderr = self.ssh.client.exec_command(run_cmd)
 
             # 7. Live Stream STDOUT
             logger.info("Streaming execution logs back to console:")
