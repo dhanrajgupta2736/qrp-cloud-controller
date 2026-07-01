@@ -4,3 +4,14 @@ aws:
   instance_id: "i-0e56bc62931de883c"
   ssh_user: ubuntu
   ssh_key: "C:/Users/HP/Downloads/pem/qrp-res.pem"
+
+git:
+  local_path: ".."
+  remote_path: "~/qrp/crypto-backtester"
+
+research:
+  auto_start_instance: true
+  auto_stop_instance: true
+  download_outputs: true
+  verify_git: true
+  workers: 6

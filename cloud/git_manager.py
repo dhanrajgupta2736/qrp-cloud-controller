@@ -67,6 +67,12 @@ class GitManager:
         if not self.ssh:
             raise RuntimeError("SSHManager is not initialized for remote Git operations.")
 
+        # Ensure SSH is connected
+        if not self.ssh.client:
+            connect_res = self.ssh.connect()
+            if not connect_res.get("success"):
+                raise RuntimeError(f"Failed to connect remote SSH client: {connect_res.get('error')}")
+
         # Check if remote .git directory exists
         res = self.ssh.execute(f"test -d {self.remote_path}/.git && echo 'exists'")
         if "exists" not in res.get("stdout", ""):

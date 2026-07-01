@@ -16,17 +16,20 @@ from cloud.aws_manager import AWSManager
 from cloud.ssh_manager import SSHManager
 from cloud.file_manager import FileManager, _resolve_remote_path
 from cloud.git_manager import GitManager
+from cloud.research_runner import ResearchRunner
 
 app = typer.Typer(help="QRP Cloud Controller Command Line Interface.")
 aws_app = typer.Typer(help="AWS EC2 instance management commands.")
 ssh_app = typer.Typer(help="SSH remote execution and file transfer commands.")
 file_app = typer.Typer(help="SFTP remote file and directory transfer commands.")
 git_app = typer.Typer(help="Git version control management commands.")
+research_app = typer.Typer(help="Orchestrated quantitative research experiment commands.")
 
 app.add_typer(aws_app, name="aws")
 app.add_typer(ssh_app, name="ssh")
 app.add_typer(file_app, name="file")
 app.add_typer(git_app, name="git")
+app.add_typer(research_app, name="research")
 
 console = Console()
 
@@ -972,6 +975,186 @@ def git_verify_sync(
 
     except Exception as e:
         console.print(Panel(f"[bold red]Sync Verification Failed:[/] {e}", border_style="red"))
+
+
+# --- Research Commands ---
+
+def get_research_runner(config_path: str = "configs/config.yaml") -> ResearchRunner:
+    """Helper to initialize ResearchRunner."""
+    return ResearchRunner(config_path)
+
+
+@research_app.command("run")
+def research_run(
+    candidate: str = typer.Argument(..., help="Candidate script identifier (e.g. c002)."),
+    workers: Optional[int] = typer.Option(None, "--workers", "-w", help="Number of concurrent process workers."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Run in simulation mode without executing research."),
+    config: str = typer.Option("configs/config.yaml", "--config", "-c", help="Path to config file.")
+) -> None:
+    """Run an orchestrated quantitative experiment candidate sweep."""
+    try:
+        runner = get_research_runner(config)
+        # Use config workers if not provided
+        if workers is None:
+            workers = runner.config.get("research.workers", 6)
+
+        console.print(f"[bold yellow]Starting candidate sweep run for {candidate}...[/]")
+        res = runner.run_candidate(candidate, workers=workers, dry_run=dry_run)
+
+        # Display summary panel
+        success = res.get("success", False)
+        status_text = "[bold green]PASS[/]" if success else "[bold red]FAIL[/]"
+
+        panel_content = (
+            f"• [cyan]Candidate:[/] {res.get('candidate', candidate)}\n"
+            f"• [cyan]Runtime:[/] {res.get('runtime_seconds', 0.0)} seconds\n"
+            f"• [cyan]Commit:[/] {res.get('commit', 'N/A')}\n"
+            f"• [cyan]Branch:[/] {res.get('branch', 'main')}\n"
+            f"• [cyan]Instance:[/] {res.get('instance', 'N/A')}\n"
+            f"• [cyan]Workers:[/] {workers}\n"
+            f"• [cyan]Downloaded files:[/] {res.get('downloaded_files', 0)}\n"
+            f"• [cyan]Research status:[/] {res.get('status', 'FAILED' if not success else 'COMPLETED')}\n\n"
+            f"• [bold]Overall Status:[/] {status_text}"
+        )
+        if not success:
+            panel_content += f"\n• [red]Error:[/] {res.get('error', 'Unknown execution error')}"
+
+        console.print(Panel(
+            panel_content,
+            title="[magenta]Research Sweep Run Summary[/]",
+            border_style="green" if success else "red"
+        ))
+
+    except Exception as e:
+        console.print(Panel(f"[bold red]Research Run CLI Error:[/] {e}", border_style="red"))
+
+
+@research_app.command("resume")
+def research_resume(
+    candidate: str = typer.Argument(..., help="Candidate script identifier to resume (e.g. c002)."),
+    config: str = typer.Option("configs/config.yaml", "--config", "-c", help="Path to config file.")
+) -> None:
+    """Resume a paused or interrupted candidate sweep."""
+    try:
+        runner = get_research_runner(config)
+        console.print(f"[bold yellow]Resuming candidate sweep run for {candidate}...[/]")
+        res = runner.resume_candidate(candidate)
+
+        success = res.get("success", False)
+        status_text = "[bold green]PASS[/]" if success else "[bold red]FAIL[/]"
+
+        panel_content = (
+            f"• [cyan]Candidate:[/] {res.get('candidate', candidate)}\n"
+            f"• [cyan]Runtime:[/] {res.get('runtime_seconds', 0.0)} seconds\n"
+            f"• [cyan]Instance:[/] {res.get('instance', 'N/A')}\n"
+            f"• [cyan]Research status:[/] {res.get('status', 'FAILED' if not success else 'COMPLETED')}\n\n"
+            f"• [bold]Overall Status:[/] {status_text}"
+        )
+        if not success:
+            panel_content += f"\n• [red]Error:[/] {res.get('error', 'Unknown execution error')}"
+
+        console.print(Panel(
+            panel_content,
+            title="[magenta]Research Sweep Resume Summary[/]",
+            border_style="green" if success else "red"
+        ))
+    except Exception as e:
+        console.print(Panel(f"[bold red]Research Resume CLI Error:[/] {e}", border_style="red"))
+
+
+@research_app.command("status")
+def research_status(
+    candidate: str = typer.Argument(..., help="Candidate script identifier (e.g. c002)."),
+    config: str = typer.Option("configs/config.yaml", "--config", "-c", help="Path to config file.")
+) -> None:
+    """Query current run status and metrics of a candidate sweep."""
+    try:
+        runner = get_research_runner(config)
+        res = runner.status(candidate)
+        if res.get("success"):
+            data = res.get("candidate_data", {})
+            table = Table(title=f"Research Status: {candidate}", show_header=True, header_style="bold magenta")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="green")
+
+            table.add_row("Name", data.get("name", "N/A"))
+            table.add_row("Stage", data.get("stage", "N/A"))
+
+            status_val = data.get("status", "N/A")
+            status_style = "green" if status_val == "COMPLETED" else "yellow" if status_val == "RUNNING" else "red"
+            table.add_row("Status", f"[{status_style}]{status_val}[/]")
+
+            table.add_row("Progress %", f"{data.get('progress_pct', 0.0)}%")
+            table.add_row("Current Experiment", data.get("current_experiment") or "N/A")
+            table.add_row("ETA", data.get("eta", "N/A"))
+            table.add_row("Current Best Candidate", data.get("current_best_candidate") or "N/A")
+            table.add_row("Highest Sharpe Ratio", str(data.get("highest_sharpe", 0.0)))
+            table.add_row("Notes/Errors", data.get("notes", "None"))
+
+            console.print(table)
+        else:
+            console.print(Panel(f"[bold red]Failed to retrieve status:[/] {res.get('error')}", border_style="red"))
+    except Exception as e:
+        console.print(Panel(f"[bold red]Research Status CLI Error:[/] {e}", border_style="red"))
+
+
+@research_app.command("download")
+def research_download(
+    candidate: str = typer.Argument(..., help="Candidate script identifier (e.g. c002)."),
+    config: str = typer.Option("configs/config.yaml", "--config", "-c", help="Path to config file.")
+) -> None:
+    """Force download the generated reports and outputs for a candidate."""
+    try:
+        runner = get_research_runner(config)
+        console.print(f"[bold yellow]Downloading results for candidate {candidate}...[/]")
+        res = runner.download_results(candidate)
+        if res.get("success"):
+            console.print(
+                f"[bold green]Successfully downloaded outputs![/]\n"
+                f"Files Count: {res.get('files_count')}\n"
+                f"Total Bytes: {res.get('bytes')} bytes\n"
+                f"Elapsed: {res.get('elapsed_seconds')}s"
+            )
+        else:
+            console.print(Panel(f"[bold red]Download Failed:[/] {res.get('error')}", border_style="red"))
+    except Exception as e:
+        console.print(Panel(f"[bold red]Research Download CLI Error:[/] {e}", border_style="red"))
+
+
+@research_app.command("cancel")
+def research_cancel(
+    candidate: str = typer.Argument(..., help="Candidate script identifier to kill (e.g. c002)."),
+    config: str = typer.Option("configs/config.yaml", "--config", "-c", help="Path to config file.")
+) -> None:
+    """Cancel/kill the running sweep script on the remote AWS instance."""
+    try:
+        runner = get_research_runner(config)
+        console.print(f"[bold red]Cancelling remote execution for {candidate}...[/]")
+        res = runner.cancel(candidate)
+        if res.get("success"):
+            console.print(f"[bold green]Kill signal sent. Remote status check complete (elapsed {res.get('elapsed_seconds')}s).[/]")
+        else:
+            console.print(Panel(f"[bold red]Cancel Failed:[/] {res.get('error')}", border_style="red"))
+    except Exception as e:
+        console.print(Panel(f"[bold red]Research Cancel CLI Error:[/] {e}", border_style="red"))
+
+
+@research_app.command("cleanup")
+def research_cleanup(
+    candidate: str = typer.Argument(..., help="Candidate script identifier to cleanup (e.g. c002)."),
+    config: str = typer.Option("configs/config.yaml", "--config", "-c", help="Path to config file.")
+) -> None:
+    """Clean checkpoints and remote output reports for a candidate."""
+    try:
+        runner = get_research_runner(config)
+        console.print(f"[bold red]Cleaning up remote outputs and checkpoints for {candidate}...[/]")
+        res = runner.cleanup(candidate)
+        if res.get("success"):
+            console.print(f"[bold green]Cleanup finished successfully on remote (elapsed {res.get('elapsed_seconds')}s).[/]")
+        else:
+            console.print(Panel(f"[bold red]Cleanup Failed:[/] {res.get('error')}", border_style="red"))
+    except Exception as e:
+        console.print(Panel(f"[bold red]Research Cleanup CLI Error:[/] {e}", border_style="red"))
 
 
 if __name__ == "__main__":
