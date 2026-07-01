@@ -1,24 +1,6 @@
-# QRP Cloud Controller Configuration
-
+# AWS EC2 Manager configuration for QRP Cloud Controller
 aws:
-  region: "us-east-1"
-  ami_id: "ami-0c7217cdde317cfec"  # Example Ubuntu 22.04 LTS AMI
-  instance_type: "t3.medium"
-  key_name: "qrp-key"
-  security_group_ids:
-    - "sg-12345678"
-
-ssh:
-  username: "ubuntu"
-  key_path: "~/.ssh/qrp-key.pem"
-  connection_timeout: 30
-
-git:
-  repo_url: "https://github.com/example/qrp-pipeline.git"
-  branch: "main"
-
-experiment:
-  command: "python main.py --config config.yaml"
-  sync_paths:
-    - "outputs/"
-    - "logs/"
+  region: ap-south-1
+  instance_id: "i-0e56bc62931de883c"
+  ssh_user: ubuntu
+  ssh_key: "C:/Users/HP/Downloads/pem/qrp-res.pem"
